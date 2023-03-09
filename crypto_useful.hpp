@@ -18,24 +18,31 @@ William Denny
 namespace gv
 {
 
-// circular left shift bitwise operation for int of datatype T
-// likely candidates are uint32_t, uint64_t
-// takes uint32_t n and T x as parameters, where n is the number of left rotations and x is var to be shifted
-// returns the shifted x
+// **************************************************************************************************************
+// BITWISE FUNCTIONS
+// **************************************************************************************************************
+
 template <typename T>
 T circ_left_shift(const uint32_t& n, const T& x)
 {
     return ((x << n) | (x >> (sizeof(T)*8 - n)));
 }
 
+template <typename T>
+T circ_right_shift(const uint32_t& n, const T& x)
+{
+    return ((x >> n) | (x << (sizeof(T)*8 - n)));
+}
+
+// **************************************************************************************************************
+// HEXIDECIMAL 
 // **************************************************************************************************************
 
-// returns 32-bit word as hex string
-// makes copy of word as it is modified by code
+// returns 32-bit word as hexcode string
 template <typename T>
-std::string word_to_hex(T word)
+std::string to_hexcode(T word)
 {
-    std::string hex = "";
+    std::string hexcode = "";
 
     // initialise kernel to isolate right-most 4 binary digits of word
     // this corresponds to a hexidecimal char
@@ -45,59 +52,57 @@ std::string word_to_hex(T word)
     for (int i = 0; i < sizeof(T) * 2; ++i)
     {   
         uint8_t conv = kernel & word;
-        uint8_t hex_char;
+        uint8_t hexcode_char;
 
         if (conv < 10)
-            hex_char = 48 + conv;
+            hexcode_char = 48 + conv;
         else
-            hex_char = 97 + (conv - 10);
+            hexcode_char = 97 + (conv - 10);
 
-        hex = (char)hex_char + hex;
+        hexcode = (char)hexcode_char + hexcode;
         word = word >> 4;
     }
 
-    return hex;
+    return hexcode;
 }
 
-// **************************************************************************************************************
-
-// converts a hex string into a word of type T, given by template parameter
-// likely candidates are uint32_t, uint64_t
-// letters must be in lower case!
+// converts a hexcode string into a word of type T
 template <typename T>
-T hex_to_word(const std::string& hex)
+T from_hexcode(const std::string& hexcode)
 {
     // each char in hexcode represents 4 bits
     // therefore the size of the hexcode should be <= 2 * sizeof(T)
-    assert(hex.size() <= 2*sizeof(T));
+    assert(hexcode.size() <= 2*sizeof(T));
 
     T word = 0;
 
-    for (int i = 0; i < hex.size(); ++i)
+    for (int i = 0; i < hexcode.size(); ++i)
     {
-        uint8_t hex_char = hex[i];
+        uint8_t hexcode_char = hexcode[i];
 
         // assert that this char is either 0,1,...,0 or a,b,...,e
-        assert((hex_char >= 48 && hex_char <= 57) || (hex_char >= 97 && hex_char <= 102));
+        assert((hexcode_char >= 48 && hexcode_char <= 57) || (hexcode_char >= 97 && hexcode_char <= 102));
 
         word = word << 4;
 
-        if (hex_char <= 57)
-            word += (T)hex_char - 48;
+        if (hexcode_char <= 57)
+            word += (T)hexcode_char - 48;
         else
-            word += (T)hex_char + 10 - 97;
+            word += (T)hexcode_char + 10 - 97;
     }
 
     return word;
 }
 
 // **************************************************************************************************************
+// PRINTING FUNCTIONS
+// **************************************************************************************************************
 
 // printed vector of words with char-wise breakdown within each word
 // each char's binary, char and hex codes are printed
 // integer datatype size is left as template parameter, e.g. uint32_t, uint64_t are likely candidates
 template <typename T>
-void print_word_vec(const std::vector<T>& vec)
+void print_words(const std::vector<T>& vec)
 {
     // the size of vector should be limited to (2^64)-1
     uint64_t num_words = vec.size();
@@ -105,7 +110,7 @@ void print_word_vec(const std::vector<T>& vec)
     for (int i = 0; i < num_words; ++i)
     {
         std::cout << "\nWORD " << i << "\nFull word (bin): \t" << std::bitset<32>(vec[i]) << std::endl;
-        std::cout << "Full word (hex): \t" << word_to_hex(vec[i]) << "\n" << std::endl;
+        std::cout << "Full word (hex): \t" << to_hexcode<T>(vec[i]) << "\n" << std::endl;
 
         // each char represents 1 byte (8 bits)
         // therefore the number of chars = sizeof(T)
@@ -136,7 +141,7 @@ void print_word_vec(const std::vector<T>& vec)
             }
 
             // display hexcode
-            std::cout << "\t" << word_to_hex((char)conv_8bit) << std::endl;
+            std::cout << "\t" << to_hexcode<char>((char)conv_8bit) << std::endl;
         }
     }
     std::cout << "\n" << std::endl;
