@@ -183,7 +183,7 @@ sha1_word sha1::K(const sha1_word& t)
 }
 
 // computes message digest using sha1 algorithm
-std::vector<sha1_word> sha1::msg_digest(const std::string& str)
+std::vector<sha1_word> sha1::digest(const std::string& str)
 {
     // ensures that string is properly padded
     std::vector<sha1_word> word_vec = preprocess_str(str);

@@ -172,10 +172,10 @@ void sha3_keccakp(const int32_t& l, const int32_t& num_rnds, lane* state, lane* 
 // c = capacity in bits (512)
 // l = 6 (w = 64 = 1<<6)
 template <int32_t d, int32_t c, typename lane, int32_t l>
-std::string sha3(const std::string& str)
+std::string digest(const std::string& str)
 {
     const char* cstr = str.c_str();
-    uint32_t cstr_len = str.size();
+    uint32_t cstr_size = str.size();
 
     assert((1<<l) == sizeof(lane)*8);
 
@@ -185,33 +185,33 @@ std::string sha3(const std::string& str)
     uint32_t r = b - c;                       // rate (int mult of 8) (bits)
     uint32_t num_rnds = 12 + 2*l;             // number of rounds
 
-    uint32_t msg_len = cstr_len;              // number of chars in message (bytes)
-    uint32_t digest_len = d / 8;              // number of chars in digest (bytes)
-    uint32_t rate_len = r / 8;                // number of chars in rate (bytes)
+    uint32_t msg_size = cstr_size;              // number of chars in message (bytes)
+    uint32_t digest_size = d / 8;              // number of chars in digest (bytes)
+    uint32_t rate_size = r / 8;                // number of chars in rate (bytes)
 
     // padding
-    uint32_t num_parts = 1 + (((msg_len*8) + 4) / r);     // number of partitions of padded message
-    uint32_t pmsg_len = num_parts * rate_len;             // number of chars in padded message (bytes)
+    uint32_t num_parts = 1 + (((msg_size*8) + 4) / r);     // number of partitions of padded message
+    uint32_t pmsg_size = num_parts * rate_size;             // number of chars in padded message (bytes)
 
     // initialise padded msg as array of 8-bit ints, length of padded message, all set to zero
     // to be indexed 5*y + x for lane @ (x,y)
-    uint8_t* pmsg = new uint8_t[pmsg_len];
+    uint8_t* pmsg = new uint8_t[pmsg_size];
     
-    for (int i = 0; i < pmsg_len; ++i)
+    for (int i = 0; i < pmsg_size; ++i)
         pmsg[i] = 0;
 
     // fill first part of padded message with original message
-    std::memcpy(pmsg, cstr, msg_len);
+    std::memcpy(pmsg, cstr, msg_size);
 
     // append 01 to message and apply padding rule
-    set_bit<uint8_t, true>(pmsg[msg_len],       1, 1);
-    set_bit<uint8_t, true>(pmsg[msg_len],       2, 1);
-    set_bit<uint8_t, true>(pmsg[pmsg_len - 1],  7, 1);
+    set_bit<uint8_t, true>(pmsg[ msg_size],       1, 1);
+    set_bit<uint8_t, true>(pmsg[ msg_size],       2, 1);
+    set_bit<uint8_t, true>(pmsg[pmsg_size - 1],   7, 1);
 
     // absorption
 
     // initialise state and buffer as arrays of 25 lanes, state contains all zeros
-    lane* state = new lane[25];
+    lane* state =  new lane[25];
     lane* buffer = new lane[25];
 
     for(int i = 0; i < 25; ++i)
@@ -223,7 +223,7 @@ std::string sha3(const std::string& str)
         // set buffer to be P_i || 0^c;
         for (int j = 0; j < 25; ++j)
             buffer[j] = 0;
-        std::memcpy(buffer, pmsg + i, rate_len);
+        std::memcpy(buffer, pmsg + i, rate_size);
 
         // get state to be state XOR P_i || 0^c; this is the input for the sponge function
         for (int j = 0; j < 25; ++j)
@@ -236,29 +236,24 @@ std::string sha3(const std::string& str)
     // squeezing 
     
     // initialise digest array of length r/8
-    uint8_t* digest = new uint8_t[digest_len];
+    uint8_t* digest = new uint8_t[digest_size];
 
-    for (int i = 0; i < digest_len; ++i)
+    for (int i = 0; i < digest_size; ++i)
         digest[i] = 0;
 
-    // compute number of iterations of squeezing required to get digest by extracting r bits from state each round
-    uint32_t num_sqz = d / r;
-    if (d % r != 0)
-        num_sqz = 1 + (d / r);
-    
     uint32_t pos = 0;
-
-    for (int i = 0; i < num_sqz; ++i)
+    while (pos < digest_size)
     {
-        // compute number of bytes to be extracted == min(rate_len, digest_len - pos)
-        if (pos + rate_len > digest_len)
+        // compute number of bytes to be extracted == min(rate_size, digest_size - pos)
+        if (pos + rate_size > digest_size)
         {
-            std::memcpy(digest + pos, state, digest_len - pos);
+            std::memcpy(digest + pos, state, digest_size - pos);
+            pos = digest_size;
         }
         else
         {
-            std::memcpy(digest + pos, state, rate_len);
-            pos += rate_len;
+            std::memcpy(digest + pos, state, rate_size);
+            pos += rate_size;
 
             // sponge function (input = state, output = state)
             sha3_keccakp<lane>(l, num_rnds, state, buffer);
@@ -267,7 +262,7 @@ std::string sha3(const std::string& str)
 
     std::string digest_str = "";
 
-    for (int i = 0; i < digest_len; ++i)
+    for (int i = 0; i < digest_size; ++i)
     {
         digest_str += gv::to_hexcode<uint8_t>(digest[i]);
     }

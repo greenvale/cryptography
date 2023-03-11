@@ -1,4 +1,4 @@
-# Cryptology
+# Cryptography
 
 This repository contains my implementations of cryptology-related algorithms and useful functions.
 
@@ -10,7 +10,7 @@ Hashing functions are one-way encryption algorithms that process an arbitrary-le
 * Uniformity, i.e. minimal collisions
 
 The hashing functions implemented thus far are:
-* SHA-1
+* ___SHA-1___
 
 ## Symmetric encryption functions
 
