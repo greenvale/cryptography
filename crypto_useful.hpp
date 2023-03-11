@@ -19,23 +19,87 @@ namespace gv
 {
 
 // **************************************************************************************************************
-// BITWISE FUNCTIONS
+//   MATHEMTATICAL FUNCTIONS
 // **************************************************************************************************************
 
 template <typename T>
-T circ_left_shift(const uint32_t& n, const T& x)
+T modulo(T x, const uint32_t& n)
 {
-    return ((x << n) | (x >> (sizeof(T)*8 - n)));
-}
-
-template <typename T>
-T circ_right_shift(const uint32_t& n, const T& x)
-{
-    return ((x >> n) | (x << (sizeof(T)*8 - n)));
+    while (x < 0)
+        x += n;
+    return x % n;
 }
 
 // **************************************************************************************************************
-// HEXIDECIMAL 
+//   BITWISE FUNCTIONS
+// **************************************************************************************************************
+
+// circular left shift
+template <typename T>
+T circ_left_shift(const T& word,  const uint32_t& n)
+{
+    return (word << modulo(n,sizeof(T)*8)) | (word >> (sizeof(T)*8 - modulo(n,sizeof(T)*8)));
+}
+
+// circular right shift
+template <typename T>
+T circ_right_shift(const T& word, const uint32_t& n)
+{
+    return (word >> modulo(n,sizeof(T)*8)) | (word << (sizeof(T)*8 - modulo(n,sizeof(T)*8)));
+}
+
+// set/clear bit
+template <typename T, bool big_endian>
+void set_bit(T& word, const uint32_t& index, const bool& val)
+{
+    if (big_endian == false)
+    {
+        // little endian
+        if (val == 1)
+            word |= (T)1 << index;
+        else
+            word &= ~((T)1 << index);
+    }
+    else
+    {
+        // big endian
+        if (val == 1)
+            word |= (T)1 << (sizeof(T)*8 - 1 - index);
+        else
+            word &= ~((T)1 << (sizeof(T)*8 - 1 - index));
+    }
+}
+
+// check bit
+template <typename T, bool big_endian>
+bool check_bit(T& word, const uint32_t& index)
+{
+    if (big_endian == false)
+    {
+        return (bool)((word >> index) & (T)1);
+    }
+    else
+    {
+        return (bool)((word >> (sizeof(T)*8 - 1 - index)) & (T)1);
+    }
+}
+
+// toggle bit
+template <typename T, bool big_endian>
+void toggle_bit(T& word, const uint32_t& index)
+{
+    if (big_endian == false)
+    {
+        word ^= (T)1 << index;
+    }
+    else
+    {
+        word ^= (T)1 << (sizeof(T)*8 - 1 - index);
+    }
+}
+
+// **************************************************************************************************************
+//   HEXIDECIMAL 
 // **************************************************************************************************************
 
 // returns 32-bit word as hexcode string
@@ -95,7 +159,7 @@ T from_hexcode(const std::string& hexcode)
 }
 
 // **************************************************************************************************************
-// PRINTING FUNCTIONS
+//   PRINTING FUNCTIONS
 // **************************************************************************************************************
 
 // printed vector of words with char-wise breakdown within each word

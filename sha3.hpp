@@ -1,53 +1,26 @@
+/* 
+SHA (security hashing algorithm) functions/classes
+- SHA-3
+
+William Denny
+9/3/23
+*/
+
+#pragma once
 
 #include <iostream>
-#include <bitset>
-#include <vector>
 #include <string>
-#include <cstring>
+#include <bitset>
 #include <assert.h>
+#include <cstring>
 
 #include "crypto_useful.hpp"
 
-
-// *************************************************************************************************
-
-// set/clear bit
-template <typename T, bool big_endian>
-void set_bit(T& word, const uint32_t& index, const bool& set)
+namespace gv
 {
-    if (big_endian == false)
-    {
-        // little endian
-        if (set == 1)
-            word |= (T)1 << index;
-        else
-            word &= ~((T)1 << index);
-    }
-    else
-    {
-        // big endian
-        if (set == 1)
-            word |= (T)1 << (sizeof(T)*8 - 1 - index);
-        else
-            word &= ~((T)1 << (sizeof(T)*8 - 1 - index));
-    }
-}
 
-// check bit
-template <typename T, bool big_endian>
-bool check_bit(T& word, const uint32_t& index)
+namespace sha3
 {
-    if (big_endian == false)
-    {
-        return (bool)((word >> index) & (T)1);
-    }
-    else
-    {
-        return (bool)((word >> (sizeof(T)*8 - 1 - index)) & (T)1);
-    }
-}
-
-// *************************************************************************************************
 
 // theta step mapping
 template <typename lane>
@@ -66,12 +39,9 @@ void sha3_theta(lane* state)
 
     // step 2
     lane* D = new lane[5];
-    lane temp;
     for (uint32_t x = 0; x < 5; ++x)
     {
-        // compute C_buffer where @x, C_buffer = C[(x+1)%5, (z-1)%w] == rotate right by 1 bit on C[(x+1)%5]
-        temp = (C[(x+1) % 5] >> 1) | (C[(x+1) % 5] << (sizeof(lane)*8 - 1));
-        D[x] = C[(x-1) % 5] ^ temp; 
+        D[x] = C[modulo(x-1, 5)] ^ circ_right_shift<lane>(C[(x+1) % 5], 1); 
     }
 
     // step 3
@@ -104,13 +74,11 @@ void sha3_rho(lane* state, lane* buffer)
     uint32_t right_shift;
     for (uint32_t t = 0; t <= 23; ++t)
     {
-        // right shift lane @ (x,y) by (t+1)(t+2)/2 % w
-        right_shift = ((t+1) * (t+2) / 2) % w;
-        buffer[5*x + y] = (state[5*x + y] >> right_shift) | (state[5*x + y] << (sizeof(lane)*8 - right_shift));
-
+        right_shift = modulo((t+1) * (t+2) / 2, w);
+        buffer[5*x + y] = circ_right_shift<lane>(state[5*x + y], right_shift);
         temp = x;
         x = y;
-        y = (2*temp + 3*y) % 5;
+        y = modulo(2*temp + 3*y, 5);
     }
 
     // copy buffer data into state
@@ -125,7 +93,7 @@ void sha3_pi(lane* state, lane* buffer)
     {
         for (uint32_t y = 0; y < 5; ++y)
         {
-            buffer[5*y + x] = state[5*x + (x + 3*y)%5];
+            buffer[5*y + x] = state[5*x + modulo(x + 3*y, 5)];
         }
     }
 
@@ -141,11 +109,13 @@ void sha3_chi(lane* state)
     {
         for (uint32_t y = 0; y < 5; ++y)
         {
-            state[5*y + x] = state[5*y + x] ^ ((state[5*y + (x+1)%5] ^ 1) & state[5*y + (x+2)%5]);
+            state[5*y + x] = state[5*y + x] ^ ((state[5*y + modulo((x+1), 5)] ^ 1) & state[5*y + modulo((x+2), 5)]);
         }
     }
 }
 
+// rc function for iota step mapping
+// input t = j + 7*ir for j=0,...,l and ir=0,...,num_rnds-1
 bool sha3_rc(const uint32_t& t)
 {
     if (t % 255 == 0)
@@ -155,6 +125,7 @@ bool sha3_rc(const uint32_t& t)
     for (uint32_t i = 1; i <= t % 255; ++i)
     {
         R = R >> 1;
+        R &= 0b1111111110000000; // only keep digits 0 -> 8
         set_bit<uint16_t, true>(R, 0, (check_bit<uint16_t, true>(R, 0) ^ check_bit<uint16_t, true>(R, 8)));
         set_bit<uint16_t, true>(R, 4, (check_bit<uint16_t, true>(R, 4) ^ check_bit<uint16_t, true>(R, 8)));
         set_bit<uint16_t, true>(R, 5, (check_bit<uint16_t, true>(R, 5) ^ check_bit<uint16_t, true>(R, 8)));
@@ -181,40 +152,34 @@ void sha3_iota(const uint32_t& l, lane* state, const uint32_t& round_index)
 
 // keccak-p algorithm
 template <typename lane>
-void keccakp(const int32_t& l, const int32_t& num_rnds, lane* state, lane* buffer)
+void sha3_keccakp(const int32_t& l, const int32_t& num_rnds, lane* state, lane* buffer)
 {   
     assert((1<<l) == sizeof(lane)*8);
-
+    uint32_t ir;
     for (uint32_t i = 0; i < num_rnds; ++i)
     {
+        ir = i + 12 + 2*l - num_rnds; // ranges from 12+2l-nr -> 12+2l-1
         sha3_theta<lane>(state);
         sha3_rho<lane>(state, buffer);
         sha3_pi<lane>(state, buffer);
         sha3_chi<lane>(state);
-        sha3_iota<lane>(l, state, i + 12 + 2*l - num_rnds);
+        sha3_iota<lane>(l, state, ir);
     }
 }
 
-// *************************************************************************************************
-
-int main()
+// main algorithm
+// d = digest length in bits (256)
+// c = capacity in bits (512)
+// l = 6 (w = 64 = 1<<6)
+template <int32_t d, int32_t c, typename lane, int32_t l>
+std::string sha3(const std::string& str)
 {
-    std::string str("");
     const char* cstr = str.c_str();
     uint32_t cstr_len = str.size();
 
-    //char cstr[] = {0b0110011};
-    //uint32_t cstr_len = 1;
+    assert((1<<l) == sizeof(lane)*8);
 
-    // parameters
-    uint32_t d = 256;                         // digest length (bits)
-    uint32_t c = 512;                         // capacity (int mult of 8) (bits)
-    uint32_t l = 6;                           // exp for lane size
-    uint32_t w = 64;                          // lane size (bits)
-    using lane = uint64_t;                    // lane datatype : datatype with size in bits == w
-    
-    // assert that parameters for l, w and lane datatype are consistent
-    assert((1 << 6) == w && sizeof(lane)*8 == w);
+    uint32_t w = (1<<l);
 
     uint32_t b = 5*5*w;                       // state width (bits)
     uint32_t r = b - c;                       // rate (int mult of 8) (bits)
@@ -223,18 +188,17 @@ int main()
     uint32_t msg_len = cstr_len;              // number of chars in message (bytes)
     uint32_t digest_len = d / 8;              // number of chars in digest (bytes)
     uint32_t rate_len = r / 8;                // number of chars in rate (bytes)
-    
+
     // padding
     uint32_t num_parts = 1 + (((msg_len*8) + 4) / r);     // number of partitions of padded message
-    uint32_t pmsg_len = num_parts * rate_len;                // number of chars in padded message (bytes)
+    uint32_t pmsg_len = num_parts * rate_len;             // number of chars in padded message (bytes)
 
     // initialise padded msg as array of 8-bit ints, length of padded message, all set to zero
     // to be indexed 5*y + x for lane @ (x,y)
     uint8_t* pmsg = new uint8_t[pmsg_len];
-
+    
     for (int i = 0; i < pmsg_len; ++i)
         pmsg[i] = 0;
-
 
     // fill first part of padded message with original message
     std::memcpy(pmsg, cstr, msg_len);
@@ -266,7 +230,7 @@ int main()
             state[j] = state[j] ^ buffer[j];
 
         // sponge function (input = state, output = state)
-        keccakp<lane>(l, num_rnds, state, buffer);
+        sha3_keccakp<lane>(l, num_rnds, state, buffer);
     }
 
     // squeezing 
@@ -297,15 +261,20 @@ int main()
             pos += rate_len;
 
             // sponge function (input = state, output = state)
-            keccakp<lane>(l, num_rnds, state, buffer);
+            sha3_keccakp<lane>(l, num_rnds, state, buffer);
         }
     }
 
-    std::cout << "Digest: " << std::endl;
+    std::string digest_str = "";
+
     for (int i = 0; i < digest_len; ++i)
     {
-        std::cout << gv::to_hexcode<uint8_t>(digest[i]);
+        digest_str += gv::to_hexcode<uint8_t>(digest[i]);
     }
-    std::cout << std::endl;
 
+    return digest_str;
 }
+
+} // namespace sha3
+
+} // namespace gv
