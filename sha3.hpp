@@ -1,275 +1,237 @@
-/* 
-SHA (security hashing algorithm) functions/classes
-- SHA-3
-
-William Denny
-9/3/23
-*/
-
 #pragma once
+
+// SHA-3
 
 #include <iostream>
 #include <string>
 #include <bitset>
 #include <assert.h>
 #include <cstring>
+#include <algorithm>
 
 #include "crypto_useful.hpp"
 
-namespace gv
-{
+/*
+    NOTES FROM NIST FIPS 202 SPECIFICATION:
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-namespace sha3
-{
+    Overview
+    ~~~~~~~~
 
-// theta step mapping
-template <typename lane>
-void sha3_theta(lane* state)
-{
-    uint32_t w = sizeof(lane) * 8;
+    Takes message as a bit string.
+    Returns message digest of certain length, e.g. SHA-256 returns 256-bit digest.
 
-    // step 1
-    lane* C = new lane[5];
-    for (uint32_t x = 0; x < 5; ++x)
-    {
-        C[x] = state[5*0 + x];
-        for (uint32_t y = 1; y < 5; ++y)
-            C[x] = C[x] ^ state[5*y + x];
-    }
+    The permutation used is a member of a family of permutations called KECCAK-p.
 
-    // step 2
-    lane* D = new lane[5];
-    for (uint32_t x = 0; x < 5; ++x)
-    {
-        D[x] = C[modulo(x-1, 5)] ^ circ_right_shift<lane>(C[(x+1) % 5], 1); 
-    }
+    2-bit suffix is appended to message to distinguish SHA-3 from SHA-3 XOFs (extendable output fcn).
 
-    // step 3
-    for (uint32_t x = 0; x < 5; ++x)
-    {
-        for (uint32_t y = 0; y < 5; ++y)
-        {
-            state[5*y + x] = state[5*y + x] ^ D[x];
-        }
-    }
+    Glossary
+    ~~~~~~~~
 
-    delete[] C, D;
-}
+    multi-rate padding      =       padding rule pad10*1, i.e. 10000.....00001
 
-// rho step mapping
-template <typename lane>
-void sha3_rho(lane* state, lane* buffer)
-{
-    uint32_t w = sizeof(lane) * 8;
+    round                   =       sequence of step-mappings, i.e. theta, pi, ...
 
-    // step 1
-    buffer[5*0 + 0] = state[5*0 + 0];
+    round constant          =       for each round of a permutation, a lane value that is determined by round index
+
     
-    // step 2
-    uint32_t x, y, temp;
-    x = 1;
-    y = 0;
+    M               =       input string into SHA-3 hash fcn
+    N               =       input string into sponge fcn
 
-    // step 3
-    uint32_t right_shift;
-    for (uint32_t t = 0; t <= 23; ++t)
-    {
-        right_shift = modulo((t+1) * (t+2) / 2, w);
-        buffer[5*x + y] = circ_right_shift<lane>(state[5*x + y], right_shift);
-        temp = x;
-        x = y;
-        y = modulo(2*temp + 3*y, 5);
-    }
+    c               =       capacity of sponge function (width of underlying fcn minus the rate)
+    r               =       rate
+    d               =       utput length in bits
+    w               =       lane size
+    l               =       log2 of lane size, i.e. 2^l == w
+    nr              =       number of rounds = 12 + 2l
+    b               =       width of permutation in bits == 25*w 
 
-    // copy buffer data into state
-    std::memcpy(state, buffer, 25 * sizeof(lane));
-}
+    r + c           =       b
 
-// pi step mapping
-template <typename lane>
-void sha3_pi(lane* state, lane* buffer)
+    X[i]            =       i'th bit of bit string X. Indices increase from left to right,
+                            e.g. X = 101000 -> X[2] = 1
+
+    Trunc_s(X)      =       The string comprised of X[0] - X[s-1], e.g. Trunc_2(10100) = 10
+    X || Y          =       Concatenation of 2 strings X and Y, e.g. 1011||0110 = 10110110
+    m mod n         =       Integer r, 0 <= r < n s.t. m-r = kn for some integer k
+                            e.g. 11 mod 5 = 1, -11 mod 5 = 4
+
+    Permutations
+    ~~~~~~~~~~~~
+
+    Permutations depend on fixed length of strings that are permuted (width, b)
+    and number of iterations of internal transform (round) (nr).
+
+
+    For this implementation we use l = 6 -> w = 2^6 = 64 -> b = 25*64 = 1600
+
+    State is arranged in 25 lanes, i.e. Lane (0,0) || ... || Lane(4,0) || Lane(0,1) || ... || Lane(4,4)
+
+*/
+
+// reverses bits in a datatype of any number of bytes
+template <typename T>
+T reverse(T x)
 {
-    for (uint32_t x = 0; x < 5; ++x)
+    T y = 0;
+    for (int i = 0; i < sizeof(T)*8; ++i)
     {
-        for (uint32_t y = 0; y < 5; ++y)
-        {
-            buffer[5*y + x] = state[5*x + modulo(x + 3*y, 5)];
-        }
+        y = y << 1;
+        y = y | (x & (T)1);
+        x = x >> 1;
     }
-
-    // copy buffer data into state
-    std::memcpy(state, buffer, 25 * sizeof(lane));
+    return y;
 }
 
-// chi step mapping
-template <typename lane>
-void sha3_chi(lane* state)
+// keeps byte order the same
+// reverses bit order within each byte
+template <typename T>
+T reverse_bitorder(const T& x)
 {
-    for (uint32_t x = 0; x < 5; ++x)
+    T y = 0;
+    T k = (T)0xff << (sizeof(T) - 1)*8;
+    T b;
+    for (int i = 0; i < sizeof(T); ++i)
     {
-        for (uint32_t y = 0; y < 5; ++y)
-        {
-            state[5*y + x] = state[5*y + x] ^ ((state[5*y + modulo((x+1), 5)] ^ 1) & state[5*y + modulo((x+2), 5)]);
-        }
+        b = k & x;
+        b = b >> (sizeof(T) - 1 - i)*8;
+        y = y << 8;
+        y = y | (T)reverse((uint8_t)b);
+        k = k >> 8;
     }
+    return y;
 }
 
-// rc function for iota step mapping
-// input t = j + 7*ir for j=0,...,l and ir=0,...,num_rnds-1
-bool sha3_rc(const uint32_t& t)
+// reverses order of bytes
+// keeps bit order the same within each byte
+template <typename T>
+T reverse_byteorder(T x)
 {
-    if (t % 255 == 0)
-        return 1;
-
-    uint16_t R = 1 << 15;
-    for (uint32_t i = 1; i <= t % 255; ++i)
+    T y = 0;
+    for (int i = 0; i < sizeof(T); ++i)
     {
-        R = R >> 1;
-        R &= 0b1111111110000000; // only keep digits 0 -> 8
-        set_bit<uint16_t, true>(R, 0, (check_bit<uint16_t, true>(R, 0) ^ check_bit<uint16_t, true>(R, 8)));
-        set_bit<uint16_t, true>(R, 4, (check_bit<uint16_t, true>(R, 4) ^ check_bit<uint16_t, true>(R, 8)));
-        set_bit<uint16_t, true>(R, 5, (check_bit<uint16_t, true>(R, 5) ^ check_bit<uint16_t, true>(R, 8)));
-        set_bit<uint16_t, true>(R, 6, (check_bit<uint16_t, true>(R, 6) ^ check_bit<uint16_t, true>(R, 8)));
+        y = y << 8;
+        y = y | (T)(x & (T)0xff);
+        x = x >> 8;
     }
-    return check_bit<uint16_t, true>(R, 0);
+    return y;
 }
 
-// iota step mapping
-template <typename lane>
-void sha3_iota(const uint32_t& l, lane* state, const uint32_t& round_index)
+// print message in sha3-style hexcode
+template <typename T>
+std::string sha3_hex(const std::vector<T>& x)
 {
-    assert((1<<l) == sizeof(lane)*8);
+    std::string H;
+    std::string buf;
 
-    // step 2
-    lane RC = 0;
-
-    // step 3
-    for (uint32_t j = 0; j <= l; ++j)
-        set_bit<lane, true>(RC, (1<<j) - 1, sha3_rc(j + 7*round_index));
-
-    state[5*0 + 0] = state[5*0 + 0] ^ RC;
-}
-
-// keccak-p algorithm
-template <typename lane>
-void sha3_keccakp(const int32_t& l, const int32_t& num_rnds, lane* state, lane* buffer)
-{   
-    assert((1<<l) == sizeof(lane)*8);
-    uint32_t ir;
-    for (uint32_t i = 0; i < num_rnds; ++i)
+    for (int i = 0; i < x.size(); ++i)
     {
-        ir = i + 12 + 2*l - num_rnds; // ranges from 12+2l-nr -> 12+2l-1
-        sha3_theta<lane>(state);
-        sha3_rho<lane>(state, buffer);
-        sha3_pi<lane>(state, buffer);
-        sha3_chi<lane>(state);
-        sha3_iota<lane>(l, state, ir);
+        // reverse byte order to mimic text layout
+        // bits within each byte are stored in little-endian style
+        T rev = reverse_byteorder(x[i]);
+        H += gv::to_hexcode(rev);
     }
-}
-
-// main algorithm
-// d = digest length in bits (256)
-// c = capacity in bits (512)
-// l = 6 (w = 64 = 1<<6)
-template <int32_t d, int32_t c, typename lane, int32_t l>
-std::string digest(const std::string& str)
-{
-    const char* cstr = str.c_str();
-    uint32_t cstr_size = str.size();
-
-    assert((1<<l) == sizeof(lane)*8);
-
-    uint32_t w = (1<<l);
-
-    uint32_t b = 5*5*w;                       // state width (bits)
-    uint32_t r = b - c;                       // rate (int mult of 8) (bits)
-    uint32_t num_rnds = 12 + 2*l;             // number of rounds
-
-    uint32_t msg_size = cstr_size;              // number of chars in message (bytes)
-    uint32_t digest_size = d / 8;              // number of chars in digest (bytes)
-    uint32_t rate_size = r / 8;                // number of chars in rate (bytes)
-
-    // padding
-    uint32_t num_parts = 1 + (((msg_size*8) + 4) / r);     // number of partitions of padded message
-    uint32_t pmsg_size = num_parts * rate_size;             // number of chars in padded message (bytes)
-
-    // initialise padded msg as array of 8-bit ints, length of padded message, all set to zero
-    // to be indexed 5*y + x for lane @ (x,y)
-    uint8_t* pmsg = new uint8_t[pmsg_size];
     
-    for (int i = 0; i < pmsg_size; ++i)
-        pmsg[i] = 0;
-
-    // fill first part of padded message with original message
-    std::memcpy(pmsg, cstr, msg_size);
-
-    // append 01 to message and apply padding rule
-    set_bit<uint8_t, true>(pmsg[ msg_size],       1, 1);
-    set_bit<uint8_t, true>(pmsg[ msg_size],       2, 1);
-    set_bit<uint8_t, true>(pmsg[pmsg_size - 1],   7, 1);
-
-    // absorption
-
-    // initialise state and buffer as arrays of 25 lanes, state contains all zeros
-    lane* state =  new lane[25];
-    lane* buffer = new lane[25];
-
-    for(int i = 0; i < 25; ++i)
-        state[i] = 0;
-
-    // iterate through partitions of padded message
-    for (int i = 0; i < num_parts; ++i)
-    {
-        // set buffer to be P_i || 0^c;
-        for (int j = 0; j < 25; ++j)
-            buffer[j] = 0;
-        std::memcpy(buffer, pmsg + i, rate_size);
-
-        // get state to be state XOR P_i || 0^c; this is the input for the sponge function
-        for (int j = 0; j < 25; ++j)
-            state[j] = state[j] ^ buffer[j];
-
-        // sponge function (input = state, output = state)
-        sha3_keccakp<lane>(l, num_rnds, state, buffer);
-    }
-
-    // squeezing 
-    
-    // initialise digest array of length r/8
-    uint8_t* digest = new uint8_t[digest_size];
-
-    for (int i = 0; i < digest_size; ++i)
-        digest[i] = 0;
-
-    uint32_t pos = 0;
-    while (pos < digest_size)
-    {
-        // compute number of bytes to be extracted == min(rate_size, digest_size - pos)
-        if (pos + rate_size > digest_size)
-        {
-            std::memcpy(digest + pos, state, digest_size - pos);
-            pos = digest_size;
-        }
-        else
-        {
-            std::memcpy(digest + pos, state, rate_size);
-            pos += rate_size;
-
-            // sponge function (input = state, output = state)
-            sha3_keccakp<lane>(l, num_rnds, state, buffer);
-        }
-    }
-
-    std::string digest_str = "";
-
-    for (int i = 0; i < digest_size; ++i)
-    {
-        digest_str += gv::to_hexcode<uint8_t>(digest[i]);
-    }
-
-    return digest_str;
+    return H;
 }
 
-} // namespace sha3
+// prints message in grid style as shown in example document
+template <typename T>
+void sha3_print_hex_grid(std::vector<T>& x)
+{
+    std::string Htab;
+    std::string H = sha3_hex(x);
+    for (int i = 0; i < H.size()/2; ++i)
+    {
+        if (i % 16 == 0 && i > 0)
+            Htab += "\n";
+        Htab += H.substr(2*i, 2);
+        Htab += " ";
+    }
+    std::cout << Htab << std::endl;
+}
 
-} // namespace gv
+// empty message
+void sha3_256()
+{
+    uint32_t l = 6;
+    uint32_t w = 1<<l;  // lane size (in bits)
+    uint32_t b = 25*w;  // width (in bits)
+    uint32_t d = 256;   // msg digest len (in bits)
+    uint32_t c = 2*d;   // capacity (in bits)
+    uint32_t r = b - c; // rate (in bits)
+
+    uint32_t lenP = r; // length of padded msg in bits
+
+    std::cout << "Rate (r): " << r << std::endl;
+    std::cout << "Number of bits in padded msg (lenP): " << lenP << std::endl;
+    std::cout << "Number of blocks (lenP/r): " << lenP / r << std::endl;
+    std::cout << "lenP % r == 0 : check -> " << lenP % r << std::endl;
+    std::cout << "Block size (lanes): " << r / (8 * sizeof(uint64_t)) << std::endl;
+
+    // create padded empty message as vector of bytes
+    // first byte is __ (nothing) appended by 01, then 1 to start padding
+    // this is reversed s.t. 0th index is on RHS to give correct numerical value
+    // final byte in padded message is 00..001, which is also reversed.
+    std::vector<uint8_t> N(200, 0);
+    N[0]            = reverse((uint8_t)0b01100000);
+    N[lenP/8 - 1]   = reverse((uint8_t)0b00000001);
+
+    // convert padded message into vector of 64-bit words
+    // to be divided into blocks of size 17
+    std::vector<uint64_t> N_64((uint64_t*)N.data(), (uint64_t*)(N.data()) + 25);
+
+    // print padded message in hexcode grid
+/* */
+    //std::cout << sha3_hex(N) << std::endl;
+    //std::cout << sha3_hex(N_64) << std::endl;
+
+    std::cout << "\nPadded message:" << std::endl;
+    sha3_print_hex_grid(N_64);
+
+    // print padded message in binary
+/* 
+    //for (auto n : N)
+    //    std::cout << std::bitset<8>(n) << std::endl;
+    std::cout << "\n\n";
+    for (auto n : N_64)
+        std::cout << std::bitset<64>(n) << std::endl;
+*/
+    // each block is 136 bytes == 17 * 64-bit lanes
+
+    std::vector<uint64_t> buf;
+    std::vector<uint64_t> state(25, 0);
+
+    // create the only block required, has size = r bits
+    // store in 17 * 64-bit words
+    std::vector<uint64_t> block0(r/(sizeof(uint64_t)*8));
+    std::copy(N_64.begin(), N_64.begin() + r/(sizeof(uint64_t)*8), block0.begin());
+    
+    // ABSORBING
+
+    // copy 17*64-bit word block into state
+    buf = std::vector<uint64_t>(25, 0);
+    std::copy(block0.begin(), block0.end(), buf.begin());
+
+    // state XOR (P0 || 0^c)
+    // use transform
+
+    // print initial state
+/*
+    std::cout << "\n\n Initial state:\n";
+    sha3_print_hex_grid(state);
+*/
+
+    // perform KECCAK function on state
+    // iterate rounds
+        // calculate round index ir
+        // theta
+        // rho
+        // pi
+        // chi
+        // iota
+
+    // SQUEEZING
+
+    // need to get message of length trunc d (d = 256-bits, rate = 1088 bits)
+}
