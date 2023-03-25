@@ -1,6 +1,24 @@
 #pragma once
+/*
+    SHA-3 256 Algorithm
 
-// SHA-3
+    - Outputs 256-bit message digest
+
+    - Takes input of string of bytes (does not handle general string of bits)
+
+    - Parameters:
+        l = 6
+        w = 2^l = 64            (lane size in bits)
+        b = 25*w = 1600         (width in bits)
+        d = 256                 (msg digest size)
+        c = 2*d = 512           (capacity in bits)
+        r = b - c = 1088        (rate in bits)
+
+        block size = r
+        in bytes = 1088/8 = 136
+        in 64-bit vals = 136/8 = 17
+
+*/
 
 #include <iostream>
 #include <string>
@@ -12,16 +30,242 @@
 
 #include "crypto_useful.hpp"
 
-/*
+namespace gv
+{
 
-*/
+namespace sha3_256
+{
+
+//********************************************************************************************************************
+
+// FUNCTION DECLARATIONS
+
+// step mappings
+std::vector<uint64_t> theta(const std::vector<uint64_t>& state);
+std::vector<uint64_t> pi(const std::vector<uint64_t>& state);
+std::vector<uint64_t> rho(const std::vector<uint64_t>& state);
+std::vector<uint64_t> chi(const std::vector<uint64_t>& state);
+std::vector<uint64_t> iota(const int& i, const std::vector<uint64_t>& state);
+uint64_t RC(const int& i);
+
+// main digest fcn
+std::string digest(const std::string& str);
+
+// hexcode fcns
+template <typename T>
+std::string hex(const std::vector<T>& x);
+template <typename T>
+void print_hex_grid(std::vector<T>& x);
+
+//********************************************************************************************************************
+
+// message digest
+std::string digest(const std::string& str)
+{
+    // PADDING
+
+    int width = 1600;
+    int capacity = 2*256;
+    int rate = width - capacity;        // 1088
+
+    // obtain vector of chars from input string
+    int num_chars = str.size();
+    std::vector<uint8_t> msg(str.c_str(), str.c_str() + str.size());
+
+    // the string of bits reads from left to right and is indexed from left to right (i.e. big-endian)
+    // however, this code does bitwise operations from right to left (i.e. little-endian)
+    // therefore, the bits in each byte in the input string must be reversed
+    std::transform(msg.cbegin(), msg.cend(), msg.begin(), [](uint8_t x){return gv::reverse_b<uint8_t>(x);});
+
+    // the message will be divided into blocks of 1088 bits (= rate)
+    // a suffix of 01 is applied meaning 1 byte will be appended to the input string
+    // a padding rule of 10*1 is applied
+
+    // calculate number of extra bytes
+    int extra_bytes = gv::modulo(-num_chars - 1, rate/8);
+
+    // extend msg vector of bytes to contain extra bytes
+    msg.insert(msg.cend(), extra_bytes + 1, 0);
+
+    std::cout << "Extra bytes needed: " << (extra_bytes + 1) << " | Number of bytes in padded message: " << msg.size() << std::endl;
+
+    // add padding to message
+    if (extra_bytes == 0)
+    {
+        // only 1 byte needs to be added; this byte is: 
+        // 0110 0001 (big endian)
+        // 1000 0110 (little endian)
+        // 8    6    (little endian hexcode)
+        *(msg.end() - 1) = reverse_b<uint8_t>(0b01100001);
+    }
+    else
+    {
+        // two bytes need to be added; these bytes are
+        // 0110 0000 || ... || 0000 0001 (big endian)
+        // 0000 0110 || ... || 1000 0000
+        // 0    6    || ... || 8    0
+        msg[num_chars] = reverse_b<uint8_t>(0b01100000);
+        *(msg.end() - 1) = reverse_b<uint8_t>(0b00000001);
+    }
+
+    // copy message into vector 64-bit words
+    assert((num_chars + 1 + extra_bytes) % 8 == 0);
+    std::vector<uint64_t> padmsg((uint64_t*)msg.data(), (uint64_t*)(msg.data()) + (num_chars + 1 + extra_bytes)/8);
+
+    print_hex_grid(padmsg);
+
+    // divide padded message into blocks of 17 * 64-bit words
+    std::vector<std::vector<uint64_t>> blocks;
+    assert(padmsg.size() % 17 == 0);
+    for (int i = 0; i < padmsg.size() / 17; ++i)
+        blocks.push_back(std::vector<uint64_t>(padmsg.cbegin() + i*17, padmsg.cbegin() + (i+1)*17));
+
+    // *****************************************************
+
+    // SPONGE FUNCTION
+
+    // initialise state as zeros
+    std::vector<uint64_t> state(25, 0);
+
+    // iterate through blocks and absorb them
+    for (int n = 0; n < blocks.size(); ++n)
+    {
+        // copy 17*64-bit word block into state
+        std::vector<uint64_t> buf(25, 0);
+        std::copy(blocks[n].begin(), blocks[n].end(), buf.begin());
+
+        // calculate state XOR (P0 || 0^c) (buf) and write into state
+        std::transform(buf.cbegin(), buf.cend(), state.cbegin(), state.begin(),
+            [](uint64_t x0, uint64_t x1){return x0 ^ x1;});
+
+        std::cout << "\n\n Initial state:\n"; print_hex_grid(state);
+
+        // perform KECCAK function on state
+        // iterate rounds (number of rounds = 12+2*l, l = 6)
+        for (int i = 0; i < 12+2*6; ++i)
+        {
+            std::cout << "\n\n ~~~~ ROUND " << i << std::endl;
+            
+            // theta
+            state = theta(state);           std::cout << "\n\nState after theta:\n";    print_hex_grid(state);
+
+            // rho
+            state = rho(state);             std::cout << "\n\nState after rho:\n";      print_hex_grid(state);
+
+            // pi
+            state = pi(state);              std::cout << "\n\nState after pi:\n";       print_hex_grid(state);
+
+            // chi
+            state = chi(state);             std::cout << "\n\nState after chi:\n";      print_hex_grid(state);
+
+            // iota
+            state = iota(i, state);         std::cout << "\n\nState after iota:\n";     print_hex_grid(state);
+        
+        }
+    }
+    
+    return "";
+}
+
+// theta step mapping
+std::vector<uint64_t> theta(const std::vector<uint64_t>& state)
+{
+    std::vector<uint64_t> buf(5);
+    std::vector<uint64_t> buf2(5);
+    std::vector<uint64_t> new_state(25);
+    for (int x = 0; x < 5; ++x)
+        buf[x] = state[5*0+x] ^ state[5*1+x] ^ state[5*2+x] ^ state[5*3+x] ^ state[5*4+x];
+    for (int x = 0; x < 5; ++x)
+        buf2[x] = buf[gv::modulo(x-1, 5)] ^ gv::circ_left_shift(buf[gv::modulo(x+1, 5)], 1);
+    for (int x = 0; x < 5; ++x)
+        for (int y = 0; y < 5; ++y)
+            new_state[5*y + x] = state[5*y + x] ^ buf2[x];
+    return new_state;
+}
+
+// rho step mapping
+std::vector<uint64_t> rho(const std::vector<uint64_t>& state)
+{
+    std::vector<uint64_t> new_state = state;
+    int x = 1; 
+    int y = 0;
+    int tmp;
+    for (int t = 0; t <= 23; ++t)
+    {
+        new_state[5*y + x] = gv::circ_left_shift(state[5*y + x], (t+1)*(t+2)/2);
+        tmp = x;
+        x = y;
+        y = gv::modulo((2*tmp + 3*y), 5);
+    }
+    return new_state;
+}
+
+// pi step mapping
+std::vector<uint64_t> pi(const std::vector<uint64_t>& state)
+{
+    std::vector<uint64_t> new_state(25);
+    for (int x = 0; x < 5; ++x)
+        for (int y = 0; y < 5; ++y)
+            new_state[5*y + x] = state[5*x + gv::modulo(x+3*y, 5)];
+    return new_state;
+}
+
+// chi step mapping
+std::vector<uint64_t> chi(const std::vector<uint64_t>& state)
+{
+    std::vector<uint64_t> new_state(25);
+    for (int x = 0; x < 5; ++x) {
+        for (int y = 0; y < 5; ++y) {
+            new_state[5*y + x] = state[5*y + x] ^ 
+                ((state[5*y + gv::modulo(x+1,5)] ^ ~((uint64_t)0)) & state[5*y + gv::modulo(x+2,5)]);
+        }
+    }
+    return new_state;
+}
+
+// iota step mapping
+std::vector<uint64_t> iota(const int& i, const std::vector<uint64_t>& state)
+{
+    uint64_t rc = RC(i);
+    std::vector<uint64_t> new_state = state;
+    new_state[5*0 + 0] = new_state[5*0 + 0] ^ rc;
+    return new_state;
+}
+
+// round constant function
+uint64_t RC(const int& i)
+{
+    uint64_t rc = 0;
+    for (int j = 0; j <= 6; ++j)
+    {
+        int m = gv::modulo(j + 7*i, 255);
+        if (m != 0)
+        {
+            uint64_t R = 1;
+            for (int k = 0; k < m; ++k)
+            {
+                R = R << 1;
+                bool r8 = gv::check_bit<uint64_t,0>(R, 8);
+                gv::set_bit<uint64_t,0>(R, 0, gv::check_bit<uint64_t,0>(R, 0) ^ r8);
+                gv::set_bit<uint64_t,0>(R, 4, gv::check_bit<uint64_t,0>(R, 4) ^ r8);
+                gv::set_bit<uint64_t,0>(R, 5, gv::check_bit<uint64_t,0>(R, 5) ^ r8);
+                gv::set_bit<uint64_t,0>(R, 6, gv::check_bit<uint64_t,0>(R, 6) ^ r8);
+                R = R & (uint64_t)0xff;
+            }
+            gv::set_bit<uint64_t,0>(rc, (1<<j)-1, gv::check_bit<uint64_t,0>(R, 0));
+        }
+        else
+            gv::set_bit<uint64_t,0>(rc, (1<<j)-1, 1);
+    }
+    return rc;
+}
 
 // print message in sha3-style hexcode
 // the data is little endian style but the byte order
 // is flipped to read from left to right
 // the hexcode for each byte is then calculated
 template <typename T>
-std::string sha3_hex(const std::vector<T>& x)
+std::string hex(const std::vector<T>& x)
 {
     std::string H;
     for (int i = 0; i < x.size(); ++i)
@@ -36,10 +280,10 @@ std::string sha3_hex(const std::vector<T>& x)
 
 // prints message in grid style as shown in example document
 template <typename T>
-void sha3_print_hex_grid(std::vector<T>& x)
+void print_hex_grid(std::vector<T>& x)
 {
     std::string Htab;
-    std::string H = sha3_hex(x);
+    std::string H = hex(x);
     for (int i = 0; i < H.size()/2; ++i)
     {
         if (i % 16 == 0 && i > 0)
@@ -50,186 +294,6 @@ void sha3_print_hex_grid(std::vector<T>& x)
     std::cout << Htab << std::endl;
 }
 
-// round constant function
-uint64_t RC(const int& i)
-{
-    uint64_t rc = 0;
-    return rc;
-}
+} // namespace sha3_256
 
-// empty message
-void sha3_256()
-{
-    uint32_t l = 6;
-    uint32_t w = 1<<l;  // lane size (in bits)
-    uint32_t b = 25*w;  // width (in bits)
-    uint32_t d = 256;   // msg digest len (in bits)
-    uint32_t c = 2*d;   // capacity (in bits)
-    uint32_t r = b - c; // rate (in bits)
-
-    uint32_t lenP = r; // length of padded msg in bits
-
-    std::cout << "Rate (r): " << r << std::endl;
-    std::cout << "Number of bits in padded msg (lenP): " << lenP << std::endl;
-    std::cout << "Number of blocks (lenP/r): " << lenP / r << std::endl;
-    std::cout << "lenP % r == 0 : check -> " << lenP % r << std::endl;
-    std::cout << "Block size (lanes): " << r / (8 * sizeof(uint64_t)) << std::endl;
-
-    // create padded empty message as vector of bytes
-    // first byte is __ (nothing) appended by 01, then 1 to start padding
-    // this is reversed s.t. 0th index is on RHS to give correct numerical value
-    // final byte in padded message is 00..001, which is also reversed.
-    std::vector<uint8_t> N(200, 0);
-    N[0]            = gv::reverse_b((uint8_t)0b01100000);
-    N[lenP/8 - 1]   = gv::reverse_b((uint8_t)0b00000001);
-
-    // convert padded message into vector of 64-bit words
-    // to be divided into blocks of size 17
-    std::vector<uint64_t> N_64((uint64_t*)N.data(), (uint64_t*)(N.data()) + 25);
-
-    // print padded message in hexcode grid
-/* */
-    //std::cout << sha3_hex(N) << std::endl;
-    //std::cout << sha3_hex(N_64) << std::endl;
-
-    std::cout << "\nPadded message:" << std::endl;
-    sha3_print_hex_grid(N_64);
-
-    // print padded message in binary
-/* 
-    //for (auto n : N)
-    //    std::cout << std::bitset<8>(n) << std::endl;
-    std::cout << "\n\n";
-    for (auto n : N_64)
-        std::cout << std::bitset<64>(n) << std::endl;
-*/
-    // each block is 136 bytes == 17 * 64-bit lanes
-
-    // declare some variables
-    std::vector<uint64_t> buf, buf2;
-    int x, y, tmp; 
-
-    std::vector<uint64_t> state(25, 0);
-
-    // create the only block required, has size = r bits
-    // store in 17 * 64-bit words
-    std::vector<uint64_t> block0(r/(sizeof(uint64_t)*8));
-    std::copy(N_64.begin(), N_64.begin() + r/(sizeof(uint64_t)*8), block0.begin());
-    
-    // ABSORBING
-    std::cout << "~~~~ ABSORBING ~~~~" << std::endl;
-
-    // copy 17*64-bit word block into state
-    buf = std::vector<uint64_t>(25, 0);
-    std::copy(block0.begin(), block0.end(), buf.begin());
-
-    // state XOR (P0 || 0^c)
-    std::transform(buf.cbegin(), buf.cend(), state.cbegin(), state.begin(),
-        [](uint64_t x0, uint64_t x1){return x0 ^ x1;});
-
-    // print initial state
-/* */
-    std::cout << "\n\n Initial state:\n";
-    sha3_print_hex_grid(state);
-
-
-    // perform KECCAK function on state
-    // iterate rounds
-    for (int i = 0; i < 12+2*l; ++i)
-    {
-        std::cout << "\n\n ~~~~ ROUND " << i << std::endl;
-
-        // theta
-        buf = std::vector<uint64_t>(5);
-        buf2 = std::vector<uint64_t>(5);
-        for (x = 0; x < 5; ++x)
-            buf[x] = state[5*0+x]^state[5*1+x]^state[5*2+x]^state[5*3+x]^state[5*4+x];
-        for (x = 0; x < 5; ++x)
-            buf2[x] = buf[gv::modulo(x-1, 5)] ^ gv::circ_left_shift(buf[gv::modulo(x+1, 5)], 1);
-        for (x = 0; x < 5; ++x)
-            for (y = 0; y < 5; ++y)
-                state[5*y + x] = state[5*y + x] ^ buf2[x];
-
-        // print state after theta
-/* */
-        std::cout << "\n\nState after theta:\n";
-        sha3_print_hex_grid(state);
-
-        // rho
-        x = 1; y = 0;
-        buf = state;
-        for (int t = 0; t <= 23; ++t)
-        {
-            state[5*y + x] = gv::circ_left_shift(buf[5*y + x], (t+1)*(t+2)/2);
-            tmp = x;
-            x = y;
-            y = gv::modulo((2*tmp + 3*y), 5);
-        }
-
-        // print state after rho
-/* */
-        std::cout << "\n\nState after rho:\n";
-        sha3_print_hex_grid(state);
-
-        // pi
-        buf = state;
-        for (x = 0; x < 5; ++x)
-            for (y = 0; y < 5; ++y)
-                state[5*y + x] = buf[5*x + gv::modulo(x+3*y, 5)];
-
-        // print state after pi
-/* */
-        std::cout << "\n\nState after pi:\n";
-        sha3_print_hex_grid(state);
-
-        // chi
-        buf = state;
-        for (x = 0; x < 5; ++x) {
-            for (y = 0; y < 5; ++y) {
-                state[5*y + x] = buf[5*y + x] ^ 
-                    ((buf[5*y + gv::modulo(x+1,5)] ^ ~((uint64_t)0)) & buf[5*y + gv::modulo(x+2,5)]);
-            }
-        }
-        // print state after chi
-/* */
-        std::cout << "\n\nState after chi:\n";
-        sha3_print_hex_grid(state);
-
-        // iota
-        uint64_t rc = 0;
-        for (int j = 0; j <= l; ++j)
-        {
-            int m = gv::modulo(j + 7*i, 255);
-            if (m != 0)
-            {
-                uint64_t R = 1;
-                for (int k = 0; k < m; ++k)
-                {
-                    R = R << 1;
-                    bool r8 = gv::check_bit<uint64_t,0>(R, 8);
-                    gv::set_bit<uint64_t,0>(R, 0, gv::check_bit<uint64_t,0>(R, 0) ^ r8);
-                    gv::set_bit<uint64_t,0>(R, 4, gv::check_bit<uint64_t,0>(R, 4) ^ r8);
-                    gv::set_bit<uint64_t,0>(R, 5, gv::check_bit<uint64_t,0>(R, 5) ^ r8);
-                    gv::set_bit<uint64_t,0>(R, 6, gv::check_bit<uint64_t,0>(R, 6) ^ r8);
-                    R = R & (uint64_t)0xff;
-                }
-                gv::set_bit<uint64_t,0>(rc, (1<<j)-1, gv::check_bit<uint64_t,0>(R, 0));
-            }
-            else
-                gv::set_bit<uint64_t,0>(rc, (1<<j)-1, 1);
-        }
-        std::cout << "Round constant: " << sha3_hex(std::vector<uint64_t>({rc})) << std::endl;
-        state[5*0 + 0] = state[5*0 + 0] ^ rc;
-    
-    // print state after iota
-/* */
-        std::cout << "\n\nState after iota:\n";
-        sha3_print_hex_grid(state);
-    
-    }
-
-    // SQUEEZING
-    std::cout << "~~~~ SQUEEZING ~~~~" << std::endl;
-
-    // need to get message of length trunc d (d = 256-bits, rate = 1088 bits)
-}
+} // namespace gv
