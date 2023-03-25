@@ -11,6 +11,7 @@ Hashing functions are one-way encryption algorithms that process an arbitrary-le
 
 The hashing functions implemented thus far are:
 * ___SHA-1___
+* ___SHA-3-256___
 
 ## Symmetric encryption functions
 

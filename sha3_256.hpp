@@ -2,6 +2,8 @@
 /*
     SHA-3 256 Algorithm
 
+    William Denny (greenvale) (25th Mar 23)
+
     - Outputs 256-bit message digest
 
     - Takes input of string of bytes (does not handle general string of bits)
