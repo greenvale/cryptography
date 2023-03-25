@@ -75,7 +75,8 @@ std::string digest(const std::string& str)
     // the string of bits reads from left to right and is indexed from left to right (i.e. big-endian)
     // however, this code does bitwise operations from right to left (i.e. little-endian)
     // therefore, the bits in each byte in the input string must be reversed
-    std::transform(msg.cbegin(), msg.cend(), msg.begin(), [](uint8_t x){return gv::reverse_b<uint8_t>(x);});
+    // std::transform(msg.cbegin(), msg.cend(), msg.begin(), [](uint8_t x){return gv::reverse_b<uint8_t>(x);});
+    // CORRECTION : this is not true, the bits are not reversed as otherwise the output is incorrect!
 
     // the message will be divided into blocks of 1088 bits (= rate)
     // a suffix of 01 is applied meaning 1 byte will be appended to the input string
@@ -87,7 +88,7 @@ std::string digest(const std::string& str)
     // extend msg vector of bytes to contain extra bytes
     msg.insert(msg.cend(), extra_bytes + 1, 0);
 
-    std::cout << "Extra bytes needed: " << (extra_bytes + 1) << " | Number of bytes in padded message: " << msg.size() << std::endl;
+    //std::cout << "Extra bytes needed: " << (extra_bytes + 1) << " | Number of bytes in padded message: " << msg.size() << std::endl;
 
     // add padding to message
     if (extra_bytes == 0)
@@ -112,13 +113,15 @@ std::string digest(const std::string& str)
     assert((num_chars + 1 + extra_bytes) % 8 == 0);
     std::vector<uint64_t> padmsg((uint64_t*)msg.data(), (uint64_t*)(msg.data()) + (num_chars + 1 + extra_bytes)/8);
 
-    print_hex_grid(padmsg);
+    //print_hex_grid(padmsg);
 
     // divide padded message into blocks of 17 * 64-bit words
     std::vector<std::vector<uint64_t>> blocks;
     assert(padmsg.size() % 17 == 0);
     for (int i = 0; i < padmsg.size() / 17; ++i)
         blocks.push_back(std::vector<uint64_t>(padmsg.cbegin() + i*17, padmsg.cbegin() + (i+1)*17));
+
+    //std::cout << "Number of blocks: " << blocks.size() << std::endl;
 
     // *****************************************************
 
@@ -138,33 +141,41 @@ std::string digest(const std::string& str)
         std::transform(buf.cbegin(), buf.cend(), state.cbegin(), state.begin(),
             [](uint64_t x0, uint64_t x1){return x0 ^ x1;});
 
-        std::cout << "\n\n Initial state:\n"; print_hex_grid(state);
+        //std::cout << "\n\n Initial state:\n"; print_hex_grid(state);
 
         // perform KECCAK function on state
         // iterate rounds (number of rounds = 12+2*l, l = 6)
         for (int i = 0; i < 12+2*6; ++i)
         {
-            std::cout << "\n\n ~~~~ ROUND " << i << std::endl;
+            //std::cout << "\n\n ~~~~ ROUND " << i << std::endl;
             
             // theta
-            state = theta(state);           std::cout << "\n\nState after theta:\n";    print_hex_grid(state);
+            state = theta(state);           //std::cout << "\n\nState after theta:\n";    print_hex_grid(state);
 
             // rho
-            state = rho(state);             std::cout << "\n\nState after rho:\n";      print_hex_grid(state);
+            state = rho(state);             //std::cout << "\n\nState after rho:\n";      print_hex_grid(state);
 
             // pi
-            state = pi(state);              std::cout << "\n\nState after pi:\n";       print_hex_grid(state);
+            state = pi(state);              //std::cout << "\n\nState after pi:\n";       print_hex_grid(state);
 
             // chi
-            state = chi(state);             std::cout << "\n\nState after chi:\n";      print_hex_grid(state);
+            state = chi(state);             //std::cout << "\n\nState after chi:\n";      print_hex_grid(state);
 
             // iota
-            state = iota(i, state);         std::cout << "\n\nState after iota:\n";     print_hex_grid(state);
+            state = iota(i, state);         //std::cout << "\n\nState after iota:\n";     print_hex_grid(state);
         
         }
     }
-    
-    return "";
+
+    // convert state 64-bit vector into 8-bit vector
+    std::vector<uint8_t> state_8bit((uint8_t*)state.data(), (uint8_t*)(state.data()) + 200);
+
+    // require 256-bit digest = 32 bytes
+    std::vector<uint8_t> digest(state_8bit.begin(), state_8bit.begin() + 32);
+
+    std::string digest_hex = gv::sha3_256::hex(digest);
+
+    return digest_hex;
 }
 
 // theta step mapping
