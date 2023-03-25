@@ -13,60 +13,6 @@
 #include "crypto_useful.hpp"
 
 /*
-    NOTES FROM NIST FIPS 202 SPECIFICATION:
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    Overview
-    ~~~~~~~~
-
-    Takes message as a bit string.
-    Returns message digest of certain length, e.g. SHA-256 returns 256-bit digest.
-
-    The permutation used is a member of a family of permutations called KECCAK-p.
-
-    2-bit suffix is appended to message to distinguish SHA-3 from SHA-3 XOFs (extendable output fcn).
-
-    Glossary
-    ~~~~~~~~
-
-    multi-rate padding      =       padding rule pad10*1, i.e. 10000.....00001
-
-    round                   =       sequence of step-mappings, i.e. theta, pi, ...
-
-    round constant          =       for each round of a permutation, a lane value that is determined by round index
-
-    
-    M               =       input string into SHA-3 hash fcn
-    N               =       input string into sponge fcn
-
-    c               =       capacity of sponge function (width of underlying fcn minus the rate)
-    r               =       rate
-    d               =       utput length in bits
-    w               =       lane size
-    l               =       log2 of lane size, i.e. 2^l == w
-    nr              =       number of rounds = 12 + 2l
-    b               =       width of permutation in bits == 25*w 
-
-    r + c           =       b
-
-    X[i]            =       i'th bit of bit string X. Indices increase from left to right,
-                            e.g. X = 101000 -> X[2] = 1
-
-    Trunc_s(X)      =       The string comprised of X[0] - X[s-1], e.g. Trunc_2(10100) = 10
-    X || Y          =       Concatenation of 2 strings X and Y, e.g. 1011||0110 = 10110110
-    m mod n         =       Integer r, 0 <= r < n s.t. m-r = kn for some integer k
-                            e.g. 11 mod 5 = 1, -11 mod 5 = 4
-
-    Permutations
-    ~~~~~~~~~~~~
-
-    Permutations depend on fixed length of strings that are permuted (width, b)
-    and number of iterations of internal transform (round) (nr).
-
-
-    For this implementation we use l = 6 -> w = 2^6 = 64 -> b = 25*64 = 1600
-
-    State is arranged in 25 lanes, i.e. Lane (0,0) || ... || Lane(4,0) || Lane(0,1) || ... || Lane(4,4)
 
 */
 
