@@ -98,6 +98,54 @@ void toggle_bit(T& word, const uint32_t& index)
     }
 }
 
+// reverses bits in a datatype of any number of bytes
+template <typename T>
+T reverse_b(T x)
+{
+    T y = 0;
+    for (int i = 0; i < sizeof(T)*8; ++i)
+    {
+        y = y << 1;
+        y = y | (x & (T)1);
+        x = x >> 1;
+    }
+    return y;
+}
+
+// keeps byte order the same
+// reverses bit order within each byte
+template <typename T>
+T reverse_binB(const T& x)
+{
+    T y = 0;
+    T k = (T)0xff << (sizeof(T) - 1)*8;
+    T b;
+    for (int i = 0; i < sizeof(T); ++i)
+    {
+        b = k & x;
+        b = b >> (sizeof(T) - 1 - i)*8;
+        y = y << 8;
+        y = y | (T)gv::reverse_b((uint8_t)b);
+        k = k >> 8;
+    }
+    return y;
+}
+
+// reverses order of bytes
+// keeps bit order the same within each byte
+template <typename T>
+T reverse_B(T x)
+{
+    T y = 0;
+    for (int i = 0; i < sizeof(T); ++i)
+    {
+        y = y << 8;
+        y = y | (T)(x & (T)0xff);
+        x = x >> 8;
+    }
+    return y;
+}
+
 // **************************************************************************************************************
 //   HEXIDECIMAL 
 // **************************************************************************************************************
@@ -134,7 +182,7 @@ std::string to_hexcode(T word)
 template <typename T>
 T from_hexcode(const std::string& hexcode)
 {
-    // each char in hexcode represents 4 bits
+    // each char in hexcode represents 4 bits so each byte contains 2 hex digits
     // therefore the size of the hexcode should be <= 2 * sizeof(T)
     assert(hexcode.size() <= 2*sizeof(T));
 
