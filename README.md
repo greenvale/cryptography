@@ -1,6 +1,6 @@
 # Cryptography
 
-This repository contains my implementations of cryptology-related algorithms and useful functions.
+This repository contains my implementations of cryptography-related algorithms and useful functions.
 
 The hashing functions I've implemented are:
 * ___SHA1___
@@ -10,7 +10,7 @@ The hashing functions I've implemented are:
 - [Requirements](#requirements)
 - [Usage](#usage)
 - [Hashing](#hashing)
-- [Encryption](#encryption)
+<!--- [Encryption](#encryption)-->
 
 ## Usage
 
@@ -99,9 +99,10 @@ For each 1088-bit block in the input, you
 
 Simply take the first 256 bits of the internal state.
 
-## Encryption
+<!--## Encryption
 
 Symmetric encryption functions take a message and private key as inputs to produce an encrypted message. The same private key is then used to decrypt the message.
 
 The symmetric encryption functions implemented thus far are:
 * ...
+-->
