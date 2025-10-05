@@ -16,6 +16,8 @@ William Denny
 #include <bitset>
 #include <array>
 #include <assert.h>
+#include <sstream>
+#include <iomanip>
 
 #include "crypto_useful.hpp"
 
@@ -42,13 +44,12 @@ class sha1
 public:
     sha1() = delete;
 
-    static std::vector<sha1_word> msg_digest(const std::string& str);
+    static std::string digest(const std::string& str);
 
-private:
     static std::vector<sha1_word> preprocess_str(const std::string& str);
 
-    static sha1_word f(const uint32_t& t, const sha1_word& B, const sha1_word& C, const sha1_word& D);
-    static sha1_word K(const uint32_t& t);
+    static sha1_word f(const sha1_word& t, const sha1_word& B, const sha1_word& C, const sha1_word& D);
+    static sha1_word K(const sha1_word& t);
 
 };
 
@@ -144,7 +145,7 @@ std::vector<sha1_word> sha1::preprocess_str(const std::string& str)
 }
 
 // logical function, taking t parameter 0 <= t < 80
-sha1_word sha1::f(const uint32_t& t, const sha1_word& B, const sha1_word& C, const sha1_word& D)
+sha1_word sha1::f(const sha1_word& t, const sha1_word& B, const sha1_word& C, const sha1_word& D)
 {
     assert(t >= 0 && t < 80);
 
@@ -183,10 +184,10 @@ sha1_word sha1::K(const sha1_word& t)
 }
 
 // computes message digest using sha1 algorithm
-std::vector<sha1_word> sha1::digest(const std::string& str)
+std::string sha1::digest(const std::string& str)
 {
     // ensures that string is properly padded
-    std::vector<sha1_word> word_vec = preprocess_str(str);
+    std::vector<sha1_word> word_vec = sha1::preprocess_str(str);
 
     // compute number of blocks provided
     // each block contains block_size / (sizeof(word) * 8) number of words
@@ -238,7 +239,7 @@ std::vector<sha1_word> sha1::digest(const std::string& str)
             
             E = D;
             D = C;
-            C = circ_left_shift(B, 0);
+            C = circ_right_shift(B, 2);
             B = A;
             A = temp;
         }
@@ -251,7 +252,22 @@ std::vector<sha1_word> sha1::digest(const std::string& str)
         H4 = H4 + E;
     }
 
-    return {H0, H1, H2, H3, H4};
+    std::vector<sha1_word> words = {H0, H1, H2, H3, H4};
+
+    // use this string stream to build the output digest text
+    std::ostringstream oss;
+
+    // this pads a number shorter than the full width with zeros
+    // e.g. 1f becomes 0000001f
+    oss << std::hex << std::setfill('0');
+
+    for (auto w : words)
+    {
+        // ensure 32-bit treated as unsigned to avoid sign extension issues
+        oss << std::setw(8) << (uint32_t)w;
+    }
+
+    return oss.str();
 }
 
 } // namespace gv
